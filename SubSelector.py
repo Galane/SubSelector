@@ -1059,7 +1059,9 @@ class BinOCRSession:
                 self.glyphs[gid]["bin"] = target_bin
                 self.glyphs[gid]["text"] = target_bin
 
-    def export_srt(self):
+    def export_srt(self, min_gap_ms=1):
+        min_gap_ms = max(0, int(min_gap_ms))
+
         def fmt_ts(ms):
             ms = max(0, int(ms))
             hrs = ms // 3600000
@@ -1077,8 +1079,9 @@ class BinOCRSession:
             key = (g["cue"], g["line"])
             by_cue_line.setdefault(key, []).append(g)
 
-        srt_blocks = []
-        for cue in self.cues:
+        ordered_cues = sorted(self.cues, key=lambda c: (c["start_ms"], c["index"]))
+        non_empty = []
+        for cue in ordered_cues:
             c_idx = cue["index"]
             lines_out = []
             for l_idx in range(cue["line_count"]):
@@ -1099,11 +1102,26 @@ class BinOCRSession:
                             s_ptr += 1
                     token = item["text"] if item["text"] else "?"
                     chars.append(token)
-                lines_out.append("".join(chars))
+                line_str = "".join(chars).strip()
+                if line_str:
+                    lines_out.append(line_str)
 
-            text_block = "\n".join(lines_out) if lines_out else "[EMPTY]"
+            if not lines_out:
+                continue
+
+            start = max(0, int(cue["start_ms"]))
+            end = max(start + 1, int(cue["end_ms"]))
+            non_empty.append([start, end, "\n".join(lines_out)])
+
+        for i in range(len(non_empty) - 1):
+            next_start = non_empty[i + 1]
+            if non_empty[i] > next_start - min_gap_ms:
+                non_empty[i] = max(non_empty[i] + 1, next_start - min_gap_ms)
+
+        srt_blocks = []
+        for out_idx, (start_ms, end_ms, text_block) in enumerate(non_empty, 1):
             srt_blocks.append(
-                f"{c_idx}\n{fmt_ts(cue['start_ms'])} --> {fmt_ts(cue['end_ms'])}\n{text_block}\n"
+                f"{out_idx}\n{fmt_ts(start_ms)} --> {fmt_ts(end_ms)}\n{text_block}\n"
             )
         return "\n".join(srt_blocks)
 
@@ -1214,6 +1232,10 @@ HTML_UI = r"""<!DOCTYPE html>
     <input type="file" id="fileLoader" accept=".sup,.sub,.json" style="display:none" onchange="uploadSubtitleFile(this)">
     <button onclick="document.getElementById('fileLoader').click()">Open File</button>
     <button onclick="saveSession()">Save Session</button>
+    <label style="display:flex; align-items:center; gap:4px; font-size:12px; color:var(--muted);" title="Minimum gap in milliseconds between consecutive cues">
+      Gap (ms):
+      <input type="number" id="minGapInput" value="1" min="0" max="5000" style="width:58px; padding:4px 6px; font-size:12px; border-radius:6px; border:1px solid var(--border); background:#0d1117; color:var(--text);">
+    </label>
     <button class="primary" onclick="exportSRT()">Export SRT</button>
   </div>
 </header>
@@ -1513,7 +1535,8 @@ document.addEventListener("keydown", (e) => {
 });
 
 async function exportSRT() {
-  const res = await fetch("/api/export_srt");
+  const gapVal = Math.max(0, parseInt(document.getElementById("minGapInput").value, 10) || 0);
+  const res = await fetch(`/api/export_srt?min_gap=${gapVal}`);
   if (res.ok) {
     const data = await res.json();
     alert("SRT exported to:\n" + data.saved_path);
@@ -1591,11 +1614,17 @@ class OCRRequestHandler(BaseHTTPRequestHandler):
                 json.dump(SESSION.to_session_dict(), sf)
             self._send_json({"ok": True, "saved_path": out_path})
         elif parsed.path == "/api/export_srt":
+            from urllib.parse import parse_qs
+            qs = parse_qs(parsed.query)
+            try:
+                min_gap = max(0, int(qs.get("min_gap", ["1"])[0]))
+            except ValueError:
+                min_gap = 1
             script_dir = os.path.dirname(os.path.abspath(__file__))
             out_name = os.path.splitext(os.path.basename(SESSION.sup_path))[0] + ".srt"
             out_path = os.path.join(script_dir, out_name)
             with open(out_path, "w", encoding="utf-8") as srt_f:
-                srt_f.write(SESSION.export_srt())
+                srt_f.write(SESSION.export_srt(min_gap_ms=min_gap))
             self._send_json({"ok": True, "saved_path": out_path})
         else:
             self.send_error(404)
