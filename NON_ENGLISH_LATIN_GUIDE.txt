@@ -1,0 +1,135 @@
+================================================================================
+SubSelector.py - Non-English Latin Languages & Customization Guide
+================================================================================
+
+1. HOW SUBSELECTOR WORKS AS-IS WITH OTHER LATIN-SCRIPT LANGUAGES
+-----------------------------------------------------------------
+SubSelector works out of the box with European and other languages that use the
+Latin alphabet (such as Spanish, French, German, Italian, Portuguese, Dutch,
+Polish, Swedish, Norwegian, and Danish), with a few English-specific behaviors:
+
+What Works Automatically:
+  * Standard A-Z / a-z Letters, Numbers, and Basic Punctuation:
+      All standard unaccented letters and digits are pre-sorted into their
+      respective character bins just like English.
+  * Accented Letters & Diacritics (e.g., e-acute, a-grave, u-umlaut, n-tilde,
+      c-cedilla, o-slash, a-ring):
+      SubSelector's vertical-part merger automatically attaches floating accent
+      marks, dots, tildes, and cedillas to the base letter underneath them so
+      each accented letter stays together as a single glyph tile.
+  * One-Click Cluster Sorting for Accented Characters:
+      Because the built-in font templates only pre-sort unaccented A-Z
+      characters, accented letters and inverted punctuation (such as Spanish
+      inverted question/exclamation marks) will initially land in the
+      "Unsorted / Blobs" bin, grouped into pixel-identical clusters.
+      When you click one tile in "Unsorted / Blobs", type or paste the accented
+      character (for example: n-tilde or u-umlaut), and press Enter,
+      SubSelector moves EVERY matching instance across the entire subtitle
+      file into its own bin and exports clean UTF-8 .srt text.
+  * Mid-Word and End-of-Word Double-L ("ll"):
+      Words with "ll" in the middle or at the end (such as Spanish "ella" or
+      "calle", or French "elle" or "ville") still resolve automatically to
+      lowercase "ll".
+
+English-Specific Behaviors to Expect:
+  * Word-Initial "I" vs. "l" (Uppercase i vs. Lowercase L):
+      SubSelector uses a built-in list of common English word endings to guess
+      whether a vertical bar at the start of a word is a lowercase "l" rather
+      than an uppercase "I". In other languages, words starting with lowercase
+      "l" (such as "los", "las", "les", "le", "la", "leur", or "loro") will
+      not match the English list and will remain in the Uppercase I ("I") bin
+      for you to review in Context Mode.
+  * Words Starting with "Ll" (such as Spanish "Llamar"):
+      The second "l" resolves to lowercase "l", while the first vertical bar
+      will stay in Uppercase I ("I") for quick Context Mode review.
+  * Special Ligatures (such as German Eszett or Nordic ash/oe):
+      Characters that do not have a floating vertical part will land in
+      "Unsorted / Blobs" where you can assign them once per cluster.
+
+
+================================================================================
+2. IMPORTANT WARNING BEFORE EDITING SUBSELECTOR.PY
+================================================================================
+ALWAYS USE A DEDICATED PYTHON CODE EDITOR!
+
+Python uses exact leading spaces (indentation) to define code blocks, loops,
+and functions. Editing SubSelector.py in Windows Notepad, WordPad, or a word
+processor can silently mix tabs and spaces, wrap lines, or corrupt UTF-8
+characters—causing IndentationError or SyntaxError crashes when you run it.
+
+Recommended Free Editors for Editing Python Code:
+  * IDLE (already included with Python on Windows and macOS; use Format ->
+    Untabify Region if you ever paste code)
+  * Notepad++ (Windows - free, lightweight, shows indentation guides)
+  * Visual Studio Code / VS Code (Windows, Linux, macOS)
+  * Thonny or Geany (Windows, Linux, macOS - simple and beginner-friendly)
+
+Tip: Always make a backup copy of SubSelector.py before making changes, and
+make sure your editor saves the file using UTF-8 encoding.
+
+
+================================================================================
+3. WHAT TO MODIFY IN SUBSELECTOR.PY FOR ANOTHER LANGUAGE
+================================================================================
+If you frequently process subtitles in a specific non-English Latin language,
+you can customize three places inside SubSelector.py:
+
+
+MODIFICATION A: Pre-Sort Accented Characters Automatically
+----------------------------------------------------------
+Location: Inside the function  build_builtin_templates()
+
+Find the line:
+    chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?'-:;\"()"
+
+Add the accented letters and punctuation used by your target language directly
+inside the quotes. For example, for Spanish, French, and German support:
+    chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?'-:;\"()A-accented..."
+    chars = (
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        "0123456789.,!?'-:;\"()¿¡"
+        "ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖØÙÚÛÜÝß"
+        "àáâãäåæçèéêëìíîïñòóôõöøùúûüýÿ"
+    )
+
+Also check  _guess_single_char()  just below it if you use Tesseract OCR:
+update the  tessedit_char_whitelist=...  string to include those same
+characters (or remove the whitelist option so Tesseract recognizes all UTF-8
+characters in your installed language pack).
+
+
+MODIFICATION B: Customize Word-Initial "I" vs. "l" Suffixes
+-----------------------------------------------------------
+Location: Inside  BinOCRSession._build_from_file()  under the comment:
+          # Build lowercase-normalized suffix of the current word
+
+Find the  l_tails = { ... }  set. Each entry in this set is a word ending
+(everything AFTER the initial "l") that tells SubSelector the word starts with
+a lowercase "l" rather than an uppercase "I".
+
+Examples you can add to  l_tails  for other languages:
+  * Spanish:  "a", "as", "o", "os", "e", "es", "uego", "ugar", "uz", "ibre"
+  * French:   "a", "e", "es", "ui", "eur", "eurs", "oin", "ongtemps", "ivre"
+  * German:   "ang", "ange", "assen", "eben", "eicht", "eute", "iebe", "icht"
+  * Italian:  "a", "e", "i", "o", "oro", "ui", "ei", "ungo", "uce", "ibero"
+
+Note: Only add suffixes where the uppercase "I" form does not exist as a common
+word in that language. For example, in Spanish, "la", "las", "lo", "los",
+"le", and "les" are far more common than words starting with capital "Ia"/"Io".
+
+
+MODIFICATION C: Update Case-Sensitive Letters (If Adding Accented Pairs)
+------------------------------------------------------------------------
+Location: Inside  BinOCRSession._build_from_file()  near the height check:
+
+Find the line:
+    if len(b) == 1 and b.lower() in "oscvwxz" and g.get("cap_h", 0) > 0:
+
+Because uppercase and lowercase "O", "S", "C", "V", "W", "X", and "Z" have
+nearly identical shapes, SubSelector uses character height to tell uppercase
+from lowercase. If your language uses accented versions of these letters where
+uppercase and lowercase look identical except for height (such as O-umlaut,
+O-acute, O-slash, S-caron, C-cedilla, or Z-caron), add the lowercase forms
+inside  "oscvwxz"  so SubSelector separates capital and lowercase versions by
+line height automatically.
+================================================================================
